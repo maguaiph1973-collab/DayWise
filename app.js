@@ -51,20 +51,9 @@
   let editingId = null;
   let toastTimer;
 
-  const saveTasks = () => {
-    try {
-      localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
-      return true;
-    } catch {
-      showToast(
-        "Browser storage is unavailable. Please export or copy important notes."
-      );
-      return false;
-    }
-  };
-
   function showToast(message) {
     const toast = $("toast");
+    if (!toast) return;
     toast.textContent = message;
     toast.classList.remove("hidden");
     clearTimeout(toastTimer);
@@ -73,6 +62,16 @@
       2800
     );
   }
+
+  const saveTasks = () => {
+    try {
+      localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+      return true;
+    } catch {
+      showToast("Could not save. Please export your backup.");
+      return false;
+    }
+  };
 
   function isOverdue(task) {
     return !task.done && task.due && task.due < todayISO();
@@ -87,58 +86,38 @@
   }
 
   function renderStats() {
-    const todayTasks = tasks.filter(
-      (t) => t.due === todayISO()
-    );
-
+    const todayTasks = tasks.filter(t => t.due === todayISO());
     const doneToday = tasks.filter(
-      (t) => t.done && t.completedAt === todayISO()
+      t => t.done && t.completedAt === todayISO()
     ).length;
 
     $("stat-today").textContent = todayTasks.length;
-    $("stat-done").textContent = tasks.filter((t) => t.done).length;
+    $("stat-done").textContent = tasks.filter(t => t.done).length;
     $("stat-done-note").textContent = doneToday
       ? doneToday + " completed today"
       : "Keep moving forward";
     $("stat-overdue").textContent = tasks.filter(isOverdue).length;
-    $("stat-open").textContent = tasks.filter((t) => !t.done).length;
+    $("stat-open").textContent = tasks.filter(t => !t.done).length;
     $("task-count").textContent = tasks.length
-      ? tasks.filter((t) => !t.done).length +
-        " open · " + tasks.length + " total"
+      ? tasks.filter(t => !t.done).length + " open · " + tasks.length + " total"
       : "Organize the next right step";
   }
 
   function renderTasks() {
     const list = $("task-list");
+    const priority = { High: 0, Medium: 1, Low: 2 };
 
     const visible = tasks.filter(taskMatches).sort((a, b) => {
-      if (a.done !== b.done) {
-        return Number(a.done) - Number(b.done);
-      }
-
-      const priority = { High: 0, Medium: 1, Low: 2 };
-
-      if (
-        (priority[a.priority] ?? 1) !==
-        (priority[b.priority] ?? 1)
-      ) {
-        return (
-          (priority[a.priority] ?? 1) -
-          (priority[b.priority] ?? 1)
-        );
-      }
-
-      return (a.due || "9999-12-31").localeCompare(
-        b.due || "9999-12-31"
-      );
+      if (a.done !== b.done) return Number(a.done) - Number(b.done);
+      const p = (priority[a.priority] ?? 1) - (priority[b.priority] ?? 1);
+      if (p) return p;
+      return (a.due || "9999-12-31").localeCompare(b.due || "9999-12-31");
     });
 
     if (!visible.length) {
       list.innerHTML =
         '<div class="empty"><strong>' +
-        (tasks.length
-          ? "Nothing in this view."
-          : "Your workspace is ready.") +
+        (tasks.length ? "Nothing in this view." : "Your workspace is ready.") +
         "</strong>" +
         (tasks.length
           ? "Try another filter or add a new task."
@@ -147,113 +126,68 @@
       return;
     }
 
-    list.innerHTML = visible.map((task) => {
-      const priority = ["High", "Medium", "Low"].includes(
-        task.priority
-      )
-        ? task.priority
-        : "Medium";
-
+    list.innerHTML = visible.map(task => {
+      const p = ["High", "Medium", "Low"].includes(task.priority)
+        ? task.priority : "Medium";
       const meta = [];
 
       if (task.due) {
-        meta.push(
-          '<span class="pill ' +
-          (isOverdue(task) ? "overdue" : "") +
-          '">' +
-          (isOverdue(task) ? "Overdue · " : "Due · ") +
-          escapeHTML(dateLabel(task.due)) +
-          "</span>"
-        );
+        meta.push('<span class="pill ' + (isOverdue(task) ? "overdue" : "") +
+          '">' + (isOverdue(task) ? "Overdue · " : "Due · ") +
+          escapeHTML(dateLabel(task.due)) + "</span>");
       }
 
-      meta.push(
-        '<span class="pill ' +
-        priority.toLowerCase() +
-        '">' +
-        escapeHTML(priority) +
-        "</span>"
-      );
+      meta.push('<span class="pill ' + p.toLowerCase() + '">' +
+        escapeHTML(p) + "</span>");
 
       if (task.owner) {
-        meta.push(
-          '<span class="pill">Owner · ' +
-          escapeHTML(task.owner) +
-          "</span>"
-        );
+        meta.push('<span class="pill">Owner · ' + escapeHTML(task.owner) + "</span>");
       }
 
       if (task.followup) {
-        meta.push(
-          '<span class="pill">Follow-up · ' +
-          escapeHTML(dateLabel(task.followup)) +
-          "</span>"
-        );
+        meta.push('<span class="pill">Follow-up · ' +
+          escapeHTML(dateLabel(task.followup)) + "</span>");
       }
 
       if (task.notes) {
-        meta.push(
-          '<div class="muted" style="width:100%;line-height:1.5;margin-top:3px">' +
-          escapeHTML(task.notes).replace(/\n/g, "<br>") +
-          "</div>"
-        );
+        meta.push('<div class="muted" style="width:100%;line-height:1.5;margin-top:3px">' +
+          escapeHTML(task.notes).replace(/\n/g, "<br>") + "</div>");
       }
 
-      return (
-        '<article class="task ' +
-        (task.done ? "done" : "") +
-        '">' +
+      return '<article class="task ' + (task.done ? "done" : "") + '">' +
         '<input type="checkbox" data-action="toggle" data-id="' +
-        escapeHTML(task.id) +
-        '" aria-label="Mark ' +
-        escapeHTML(task.title) +
-        ' complete" ' +
-        (task.done ? "checked" : "") +
-        ">" +
-        "<div>" +
-        '<div class="task-title">' +
-        escapeHTML(task.title) +
-        '</div><div class="task-meta">' +
-        meta.join("") +
-        "</div></div>" +
+        escapeHTML(task.id) + '" aria-label="Mark ' + escapeHTML(task.title) +
+        ' complete" ' + (task.done ? "checked" : "") + ">" +
+        "<div><div class=\"task-title\">" + escapeHTML(task.title) +
+        '</div><div class="task-meta">' + meta.join("") + "</div></div>" +
         '<div class="task-actions">' +
         '<button type="button" class="icon-button" data-action="edit" data-id="' +
-        escapeHTML(task.id) +
-        '" aria-label="Edit task">Edit</button>' +
+        escapeHTML(task.id) + '" aria-label="Edit task">Edit</button>' +
         '<button type="button" class="icon-button" data-action="delete" data-id="' +
-        escapeHTML(task.id) +
-        '" aria-label="Delete task">Delete</button>' +
-        "</div></article>"
-      );
+        escapeHTML(task.id) + '" aria-label="Delete task">Delete</button>' +
+        "</div></article>";
     }).join("");
   }
 
   function renderFollowups() {
     const list = $("followup-list");
-
-    const upcoming = tasks
-      .filter((t) => !t.done && t.followup)
+    const upcoming = tasks.filter(t => !t.done && t.followup)
       .sort((a, b) => a.followup.localeCompare(b.followup))
       .slice(0, 6);
 
     if (!upcoming.length) {
-      list.innerHTML =
-        '<div class="empty">No follow-ups scheduled yet.<br>' +
-        "Add a follow-up date to a task and it will appear here." +
-        "</div>";
+      list.innerHTML = '<div class="empty">No follow-ups scheduled yet.<br>' +
+        "Add a follow-up date to a task and it will appear here.</div>";
       return;
     }
 
-    list.innerHTML = upcoming.map((t) =>
+    list.innerHTML = upcoming.map(t =>
       '<div style="border:1px solid var(--border);border-radius:11px;padding:12px">' +
       '<div style="font-size:13px;font-weight:750;line-height:1.4">' +
-      escapeHTML(t.title) +
-      '</div><div class="muted" style="margin-top:6px">' +
-      escapeHTML(dateLabel(t.followup)) +
-      (t.owner ? " · " + escapeHTML(t.owner) : "") +
+      escapeHTML(t.title) + '</div><div class="muted" style="margin-top:6px">' +
+      escapeHTML(dateLabel(t.followup)) + (t.owner ? " · " + escapeHTML(t.owner) : "") +
       '</div><button type="button" class="link-button" data-action="edit" data-id="' +
-      escapeHTML(t.id) +
-      '" style="margin-top:8px;font-size:12px">Open task →</button></div>'
+      escapeHTML(t.id) + '" style="margin-top:8px;font-size:12px">Open task →</button></div>'
     ).join("");
   }
 
@@ -265,7 +199,6 @@
 
   function openForm(task) {
     editingId = task ? task.id : null;
-
     $("task-form").classList.remove("hidden");
     $("task-title-input").value = task?.title || "";
     $("task-due").value = task?.due || "";
@@ -273,11 +206,7 @@
     $("task-owner").value = task?.owner || "";
     $("task-followup").value = task?.followup || "";
     $("task-notes").value = task?.notes || "";
-
-    $("save-task").textContent = task
-      ? "Update task"
-      : "Save task";
-
+    $("save-task").textContent = task ? "Update task" : "Save task";
     $("add-toggle").textContent = "Close form";
     $("task-title-input").focus();
   }
@@ -290,31 +219,20 @@
     $("add-toggle").textContent = "+ Add task";
   }
 
-  $("today-label").textContent = new Date().toLocaleDateString(
-    undefined,
-    {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric"
-    }
-  );
+  $("today-label").textContent = new Date().toLocaleDateString(undefined, {
+    weekday: "long", month: "long", day: "numeric", year: "numeric"
+  });
 
   $("add-toggle").addEventListener("click", () => {
-    if (!$("task-form").classList.contains("hidden")) {
-      closeForm();
-    } else {
-      openForm(null);
-    }
+    if (!$("task-form").classList.contains("hidden")) closeForm();
+    else openForm(null);
   });
 
   $("cancel-task").addEventListener("click", closeForm);
 
-  $("task-form").addEventListener("submit", (event) => {
+  $("task-form").addEventListener("submit", event => {
     event.preventDefault();
-
     const title = $("task-title-input").value.trim();
-
     if (!title) {
       $("task-title-input").focus();
       return;
@@ -330,28 +248,19 @@
     };
 
     if (editingId) {
-      const old = tasks.find((t) => t.id === editingId);
-
-      if (old) {
-        Object.assign(old, data, {
-          updatedAt: new Date().toISOString()
-        });
-      }
-
+      const old = tasks.find(t => t.id === editingId);
+      if (old) Object.assign(old, data, { updatedAt: new Date().toISOString() });
       showToast("Task updated.");
     } else {
       tasks.push({
-        id:
-          window.crypto && crypto.randomUUID
-            ? crypto.randomUUID()
-            : String(Date.now()) +
-              Math.random().toString(16).slice(2),
+        id: window.crypto && crypto.randomUUID
+          ? crypto.randomUUID()
+          : String(Date.now()) + Math.random().toString(16).slice(2),
         ...data,
         done: false,
         createdAt: new Date().toISOString(),
         completedAt: null
       });
-
       showToast("Task added.");
     }
 
@@ -360,96 +269,59 @@
     render();
   });
 
-  $("filters").addEventListener("click", (event) => {
+  $("filters").addEventListener("click", event => {
     const button = event.target.closest("[data-filter]");
     if (!button) return;
-
     filter = button.dataset.filter;
-
-    $("filters")
-      .querySelectorAll("[data-filter]")
-      .forEach((b) =>
-        b.classList.toggle("active", b === button)
-      );
-
+    $("filters").querySelectorAll("[data-filter]").forEach(b =>
+      b.classList.toggle("active", b === button)
+    );
     renderTasks();
   });
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", event => {
     const control = event.target.closest("[data-action]");
     if (!control) return;
-
-    const task = tasks.find(
-      (t) => t.id === control.dataset.id
-    );
-
+    const task = tasks.find(t => t.id === control.dataset.id);
     if (!task) return;
 
-    const action = control.dataset.action;
+    if (control.dataset.action === "edit") openForm(task);
 
-    if (action === "edit") {
-      openForm(task);
-    }
-
-    if (action === "delete") {
-      if (
-        !window.confirm(
-          'Delete "' + task.title + '"? This cannot be undone.'
-        )
-      ) {
-        return;
-      }
-
-      tasks = tasks.filter((t) => t.id !== task.id);
+    if (control.dataset.action === "delete") {
+      if (!window.confirm('Delete "' + task.title + '"? This cannot be undone.')) return;
+      tasks = tasks.filter(t => t.id !== task.id);
       saveTasks();
       render();
       showToast("Task deleted.");
     }
   });
 
-  document.addEventListener("change", (event) => {
-    const control = event.target.closest(
-      '[data-action="toggle"]'
-    );
-
+  document.addEventListener("change", event => {
+    const control = event.target.closest('[data-action="toggle"]');
     if (!control) return;
-
-    const task = tasks.find(
-      (t) => t.id === control.dataset.id
-    );
-
+    const task = tasks.find(t => t.id === control.dataset.id);
     if (!task) return;
-
     task.done = control.checked;
     task.completedAt = task.done ? todayISO() : null;
-
     saveTasks();
     render();
-    showToast(
-      task.done ? "Marked complete." : "Task reopened."
-    );
+    showToast(task.done ? "Marked complete." : "Task reopened.");
   });
 
   const savedReview = load(REVIEW_KEY, "");
-  $("review-note").value =
-    typeof savedReview === "string" ? savedReview : "";
+  $("review-note").value = typeof savedReview === "string" ? savedReview : "";
 
   $("save-review").addEventListener("click", () => {
     try {
-      localStorage.setItem(
-        REVIEW_KEY,
-        $("review-note").value
-      );
-
+      localStorage.setItem(REVIEW_KEY, $("review-note").value);
       $("review-msg").textContent = "Saved in this browser.";
       showToast("End-of-day note saved.");
     } catch {
-      $("review-msg").textContent =
-        "Could not save. Please copy your note somewhere safe.";
+      $("review-msg").textContent = "Could not save. Please copy your note somewhere safe.";
     }
   });
 
-  // Export a complete JSON backup of tasks and the review note.
+  // JSON backup includes tasks and end-of-day note.
   const exportButton = $("export-data");
 
   if (exportButton) {
@@ -460,42 +332,34 @@
         tasks,
         endOfDayNote: $("review-note").value
       };
-
-      const blob = new Blob(
-        [JSON.stringify(backup, null, 2)],
-        { type: "application/json" }
-      );
-
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: "application/json"
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-
       a.href = url;
       a.download = "daywise-backup-" + todayISO() + ".json";
-
       document.body.appendChild(a);
       a.click();
       a.remove();
-
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       showToast("Backup downloaded.");
     });
   }
 
-  // Add a CSV export button compatible with Excel and Google Sheets.
+  // CSV spreadsheet export for Excel and Google Sheets.
   const csvButton = document.createElement("button");
-
   csvButton.type = "button";
   csvButton.id = "export-csv";
   csvButton.textContent = "Export spreadsheet (.CSV)";
   csvButton.style.cssText =
     "background:#176b68;color:white;border:0;border-radius:9px;" +
-    "padding:8px 11px;font-size:12px;font-weight:700;cursor:pointer";
+    "padding:8px 11px;font-size:12px;font-weight:700;cursor:pointer;margin-left:8px";
 
-  const headerActions = exportButton?.parentElement;
-
-  if (headerActions) {
-    csvButton.style.marginLeft = "8px";
+  if (exportButton && exportButton.parentElement) {
     exportButton.insertAdjacentElement("afterend", csvButton);
+  } else {
+    document.body.appendChild(csvButton);
   }
 
   csvButton.addEventListener("click", () => {
@@ -511,50 +375,32 @@
       ["Updated At", "updatedAt"]
     ];
 
-    const escapeCSV = (value) => {
+    const escapeCSV = value => {
       let text = String(value ?? "");
-
-      // Reduce the risk of spreadsheet formula execution.
-      if (/^[=+\-@\t\r]/.test(text)) {
-        text = "'" + text;
-      }
-
+      if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
       return '"' + text.replace(/"/g, '""') + '"';
     };
 
     const rows = [
       columns.map(([label]) => label),
-      ...tasks.map((task) =>
-        columns.map(([label, key]) => {
-          if (key === "done") {
-            return task.done ? "Completed" : "Open";
-          }
-
-          return task[key] ?? "";
-        })
-      )
+      ...tasks.map(task => columns.map(([label, key]) => {
+        if (key === "done") return task.done ? "Completed" : "Open";
+        return task[key] ?? "";
+      }))
     ];
 
-    const csv =
-      "\uFEFF" +
-      rows
-        .map((row) => row.map(escapeCSV).join(","))
-        .join("\r\n");
+    const csv = "\uFEFF" + rows
+      .map(row => row.map(escapeCSV).join(","))
+      .join("\r\n");
 
-    const blob = new Blob([csv], {
-      type: "text/csv;charset=utf-8;"
-    });
-
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-
     link.href = url;
     link.download = "daywise-tasks-" + todayISO() + ".csv";
-
     document.body.appendChild(link);
     link.click();
     link.remove();
-
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast("Spreadsheet downloaded.");
   });
