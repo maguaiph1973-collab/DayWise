@@ -47,6 +47,152 @@
   let tasks = load(TASKS_KEY, []);
   if (!Array.isArray(tasks)) tasks = [];
 
+  // Supabase uses a publishable frontend key; row-level security protects user data.
+  const SUPABASE_URL = "https://krouyuwsdjkdcgihujhb.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_EdOS6tAV_ehRUDE0FxsNhg_gWxst_0W";
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  let currentUser = null;
+  let cloudReady = false;
+  let cloudWriteQueue = Promise.resolve();
+
+  function authMessage(message, error = false) {
+    const el = $("auth-msg");
+    if (el) { el.textContent = message; el.style.color = error ? "#a12a23" : "#176b68"; }
+  }
+
+  async function persistCloud() {
+    if (!currentUser || !cloudReady) return;
+    const userId = currentUser.id;
+    const taskRows = tasks.map(task => ({
+      id: String(task.id),
+      user_id: userId,
+      task_data: task,
+      updated_at: new Date().toISOString()
+    }));
+    const localIds = new Set(taskRows.map(row => row.id));
+
+    // Serialize writes and only remove cloud rows that are no longer in this user's list.
+    // Never clear the entire table for the user before attempting the replacement.
+    cloudWriteQueue = cloudWriteQueue.then(async () => {
+      const { data: existingRows, error: readError } = await supabase
+        .from("daywise_tasks").select("id").eq("user_id", userId);
+      if (readError) throw readError;
+
+      const staleIds = (existingRows || [])
+        .map(row => String(row.id))
+        .filter(id => !localIds.has(id));
+      if (staleIds.length) {
+        const { error: deleteError } = await supabase
+          .from("daywise_tasks").delete().eq("user_id", userId).in("id", staleIds);
+        if (deleteError) throw deleteError;
+      }
+
+      if (taskRows.length) {
+        const { error: upsertError } = await supabase
+          .from("daywise_tasks").upsert(taskRows, { onConflict: "id" });
+        if (upsertError) throw upsertError;
+      }
+
+      const { error: noteError } = await supabase.from("daywise_notes").upsert({
+        user_id: userId,
+        note: $("review-note").value,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "user_id" });
+      if (noteError) throw noteError;
+    }).then(() => showToast("Synced to your account.")).catch(err => {
+      console.error("DayWise cloud sync failed:", err);
+      showToast("Cloud sync failed. Your browser copy is still saved; please export a backup.");
+    });
+    return cloudWriteQueue;
+  }
+
+  async function loadCloudData(user) {
+    currentUser = user;
+    cloudReady = false;
+    $("auth-panel").classList.add("hidden");
+    $("workspace").classList.remove("hidden");
+    $("user-email").textContent = user.email || "Signed in";
+
+    const { data, error } = await supabase.from("daywise_tasks")
+      .select("id, task_data, updated_at").eq("user_id", user.id);
+    if (error) {
+      showToast("Could not load cloud tasks. Check your table and RLS policies.");
+      console.error(error);
+      return;
+    }
+
+    const localTasks = load(TASKS_KEY, []);
+    const localNote = load(REVIEW_KEY, "");
+    const cloudTasks = (data || []).map(row => row.task_data).filter(Boolean);
+    let shouldImportLocal = false;
+
+    if (cloudTasks.length) {
+      tasks = cloudTasks;
+    } else if (Array.isArray(localTasks) && localTasks.length) {
+      shouldImportLocal = window.confirm(
+        "We found tasks saved in this browser. Copy them to your DayWise account now? Choose Cancel to leave them in this browser without importing."
+      );
+      tasks = shouldImportLocal ? localTasks : [];
+    } else {
+      tasks = [];
+    }
+
+    const { data: noteData, error: noteError } = await supabase.from("daywise_notes")
+      .select("note").eq("user_id", user.id).maybeSingle();
+    if (noteError) {
+      console.error("Could not load daily note:", noteError);
+      showToast("Could not load your cloud note. Your browser copy remains saved.");
+      return;
+    }
+
+    if (noteData) {
+      $("review-note").value = noteData.note || "";
+    } else if (typeof localNote === "string" && localNote) {
+      const importNote = shouldImportLocal || !Array.isArray(localTasks) || localTasks.length === 0;
+      if (importNote) $("review-note").value = localNote;
+      else $("review-note").value = "";
+    } else {
+      $("review-note").value = "";
+    }
+
+    // Do not overwrite browser storage merely because the user declined migration.
+    render();
+    cloudReady = true;
+    if (shouldImportLocal || (!noteData && $("review-note").value)) {
+      await persistCloud();
+    }
+  }
+
+  async function handleAuth(mode) {
+    const email = $("auth-email").value.trim();
+    const password = $("auth-password").value;
+    if (!email || !password) return authMessage("Enter your email and password.", true);
+    authMessage(mode === "signup" ? "Creating your account…" : "Signing in…");
+    const result = mode === "signup"
+      ? await supabase.auth.signUp({ email, password, options: { emailRedirectTo: "https://maguaiph1973-collab.github.io/DayWise/" } })
+      : await supabase.auth.signInWithPassword({ email, password });
+    if (result.error) return authMessage(result.error.message, true);
+    if (mode === "signup" && !result.data.session) return authMessage("Account created. Check your email to confirm it, then return here to sign in.");
+    if (result.data.user) await loadCloudData(result.data.user);
+  }
+
+  $("sign-in").addEventListener("click", () => handleAuth("signin"));
+  $("sign-up").addEventListener("click", () => handleAuth("signup"));
+  $("sign-out").addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    currentUser = null; cloudReady = false;
+    $("workspace").classList.add("hidden"); $("auth-panel").classList.remove("hidden");
+    authMessage("You have signed out.");
+  });
+
+  supabase.auth.getSession().then(({ data, error }) => {
+    if (error) { authMessage("Could not check your session. Please sign in again.", true); return; }
+    if (data.session?.user) loadCloudData(data.session.user);
+  });
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_IN" && session?.user && session.user.id !== currentUser?.id) loadCloudData(session.user);
+  });
+
   let filter = "all";
   let editingId = null;
   let toastTimer;
@@ -66,6 +212,7 @@
   const saveTasks = () => {
     try {
       localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+      if (currentUser && cloudReady) persistCloud();
       return true;
     } catch {
       showToast("Could not save. Please export your backup.");
@@ -314,7 +461,8 @@
   $("save-review").addEventListener("click", () => {
     try {
       localStorage.setItem(REVIEW_KEY, $("review-note").value);
-      $("review-msg").textContent = "Saved in this browser.";
+      if (currentUser && cloudReady) persistCloud();
+      $("review-msg").textContent = currentUser ? "Saved in this browser and syncing to your account." : "Saved in this browser.";
       showToast("End-of-day note saved.");
     } catch {
       $("review-msg").textContent = "Could not save. Please copy your note somewhere safe.";
